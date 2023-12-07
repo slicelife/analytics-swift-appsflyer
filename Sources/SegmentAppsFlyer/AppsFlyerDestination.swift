@@ -207,11 +207,12 @@ extension AppsFlyerDestination: AppsFlyerLibDelegate {
         if (firstLaunchFlag == 1) {
             segDelegate?.onConversionDataSuccess(conversionInfo)
             if (status == "Non-organic") {
-                if let mediaSource = conversionInfo["media_source"] , let campaign = conversionInfo["campaign"]{
+                if let mediaSource = conversionInfo["media_source"] , let campaign = conversionInfo["campaign"], let adgroup = conversionInfo["adgroup"]{
                     
                     let campaign: [String: Any] = [
                         "source": mediaSource,
-                        "name": campaign
+                        "name": campaign,
+                        "ad_group": adgroup
                     ]
                     let campaignStr = (campaign.compactMap({ (key, value) -> String in
                         return "\(key)=\(value)"
