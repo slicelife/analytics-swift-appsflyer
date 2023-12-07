@@ -8,6 +8,7 @@
 import SwiftUI
 import Segment
 import SegmentAppsFlyer
+import AppsFlyerSDK
 
 @main
 struct BasicExampleApp: App {
@@ -23,7 +24,9 @@ extension Analytics {
         let analytics = Analytics(configuration: Configuration(writeKey: "<YOUR WRITE KEY>")
                     .flushAt(3)
                     .trackApplicationLifecycleEvents(true))
-        analytics.add(plugin: AppsFlyerDestination())
+        analytics.add(plugin: AppsFlyerDestination(additionalConfigurationHandler: { appsFlyerLib in
+            appsFlyerLib.isDebug = true
+        }))
         return analytics
     }
 }

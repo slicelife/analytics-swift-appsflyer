@@ -29,9 +29,9 @@
 // *** To Implement Deep Linking functionality reference: https://support.appsflyer.com/hc/en-us/articles/208874366 ****
 
 import Foundation
-import UIKit
 import Segment
 import AppsFlyerLib
+import UIKit
 
 @objc(SEGAppsFlyerDestination)
 public class ObjCSegmentAppsFlyer: NSObject, ObjCPlugin, ObjCPluginShim {
@@ -39,16 +39,20 @@ public class ObjCSegmentAppsFlyer: NSObject, ObjCPlugin, ObjCPluginShim {
 }
 
 public class AppsFlyerDestination: UIResponder, DestinationPlugin  {
+
+    public typealias AdditionalConfigurationHandler = (AppsFlyerLib) -> Void
+
     public let timeline = Timeline()
     public let type = PluginType.destination
     public let key = "AppsFlyer"
     
-    public var analytics: Analytics?
-    
+    public weak var analytics: Analytics?
+
     fileprivate var settings: AppsFlyerSettings? = nil
 
     private weak var segDelegate: AppsFlyerLibDelegate?
     private weak var segDLDelegate: DeepLinkDelegate?
+    private let additionalConfigurationHandler: AdditionalConfigurationHandler?
 
     // MARK: - Initialization
 
@@ -59,32 +63,34 @@ public class AppsFlyerDestination: UIResponder, DestinationPlugin  {
     /// - Parameters:
     ///   - segDelegate: When provided, this delegate will get called back for all AppsFlyerDelegate methods - ``onConversionDataSuccess(_:)``, ``onConversionDataFail(_:)``, ``onAppOpenAttribution(_:)``, ``onAppOpenAttributionFailure(_:)``
     ///   - segDLDelegate: When provided, this delegate will get called back for all DeepLinkDelegate routines, or just ``didResolveDeeplink``
+    ///   - additionalConfigurationHandler: When provided, this handler will get called after AppsFlyerLib gets configured
     public init(segDelegate: AppsFlyerLibDelegate? = nil,
-                segDLDelegate: DeepLinkDelegate? = nil) {
+                segDLDelegate: DeepLinkDelegate? = nil,
+                additionalConfigurationHandler: AdditionalConfigurationHandler? = nil) {
         self.segDelegate = segDelegate
         self.segDLDelegate = segDLDelegate
+        self.additionalConfigurationHandler = additionalConfigurationHandler
     }
 
     // MARK: - Plugin
     public func update(settings: Settings, type: UpdateType) {
         // we've already set up this singleton SDK, can't do it again, so skip.
         guard type == .initial else { return }
-        
+
         guard let settings: AppsFlyerSettings = settings.integrationSettings(forPlugin: self) else { return }
         self.settings = settings
-        
-        AppsFlyerLib.shared().appsFlyerDevKey = settings.appsFlyerDevKey
-        AppsFlyerLib.shared().appleAppID = settings.appleAppID
-        
-        AppsFlyerLib.shared().waitForATTUserAuthorization(timeoutInterval: 60) //OPTIONAL
-        AppsFlyerLib.shared().isDebug = true //OPTIONAL
-        AppsFlyerLib.shared().deepLinkDelegate = self //OPTIONAL
-        
-        let trackAttributionData = settings.trackAttributionData
-        
-        if trackAttributionData ?? false {
-            AppsFlyerLib.shared().delegate = self
+        let appsFlyerLib = AppsFlyerLib.shared()
+
+        appsFlyerLib.appsFlyerDevKey = settings.appsFlyerDevKey
+        appsFlyerLib.appleAppID = settings.appleAppID
+
+        appsFlyerLib.deepLinkDelegate = self
+
+        if settings.trackAttributionData ?? false {
+            appsFlyerLib.delegate = self
         }
+
+        additionalConfigurationHandler?(appsFlyerLib)
     }
     
     public func identify(event: IdentifyEvent) -> IdentifyEvent? {
@@ -95,20 +101,12 @@ public class AppsFlyerDestination: UIResponder, DestinationPlugin  {
         if let traits = event.traits?.dictionaryValue {
             var aFTraits: [AnyHashable: Any] = [:]
             
-            if let email = traits["email"] as? String {
-                aFTraits["email"] = email
-            }
-            
-            if let firstName = traits["firstName"] as? String {
-                aFTraits["firstName"] = firstName
-            }
-            
-            if let lastName = traits["lastName"] as? String {
-                aFTraits["lastName"] = lastName
-            }
-            
-            if traits["currencyCode"] != nil {
-                AppsFlyerLib.shared().currencyCode = traits["currencyCode"] as? String
+            aFTraits["email"] = traits["email"] as? String
+            aFTraits["firstName"] = traits["firstName"] as? String
+            aFTraits["lastName"] = traits["lastName"] as? String
+
+            if let currencyCode = traits["currencyCode"] as? String {
+                AppsFlyerLib.shared().currencyCode = currencyCode
             }
             
             AppsFlyerLib.shared().customData = aFTraits
@@ -120,23 +118,19 @@ public class AppsFlyerDestination: UIResponder, DestinationPlugin  {
     public func track(event: TrackEvent) -> TrackEvent? {
         
         var properties = event.properties?.dictionaryValue
-        
-        let revenue: Double? = extractRevenue(key: "revenue", from: properties)
-        let currency: String? = extractCurrency(key: "currency", from: properties, withDefault: "USD")
-        
-        if let afRevenue = revenue, let afCurrency = currency {
-            properties?["af_revenue"] = afRevenue
-            properties?["af_currency"] = afCurrency
-            
+
+        if let revenue = extractRevenue(from: properties) {
+            properties?["af_revenue"] = revenue
+
+            let currency = extractCurrency(from: properties)
+            properties?["af_currency"] = currency
+
             properties?.removeValue(forKey: "revenue")
             properties?.removeValue(forKey: "currency")
-            
-            AppsFlyerLib.shared().logEvent(event.event, withValues: properties)
-            
-        } else {
-            AppsFlyerLib.shared().logEvent(event.event, withValues: properties)
         }
-        
+
+        AppsFlyerLib.shared().logEvent(event.event, withValues: properties)
+
         return event
     }
 }
@@ -168,74 +162,57 @@ extension AppsFlyerDestination: UserActivities {
 // matches existing AppsFlyer Destination to set revenue and currency as reserved properties
 // https://github.com/AppsFlyerSDK/segment-appsflyer-ios/blob/master/segment-appsflyer-ios/Classes/SEGAppsFlyerIntegration.m#L148
 extension AppsFlyerDestination {
-    internal func extractRevenue(key: String, from properties: [String: Any]?) -> Double? {
-        
-        guard let revenueProperty =  properties?[key] as? Double else {return nil}
-        
-        if let revenue = properties?["revenue"] as? String  {
-            let revenueProperty = Double(revenue)
-            return revenueProperty
-            
+
+    internal func extractRevenue(from properties: [String: Any]?) -> Double? {
+        guard let revenue = properties?["revenue"] else { return nil }
+        if let revenue = revenue as? Double {
+            return revenue
         }
-        return revenueProperty
+        if let revenue = revenue as? String {
+            return Double(revenue)
+        }
+        return nil
     }
     
-    
-    internal func extractCurrency(key: String, from properties: [String: Any]?, withDefault value: String? = nil) -> String? {
-        
-        if let currency = properties?[key] as? String {
-            return currency
-        }
-        
-        return "USD"
+    internal func extractCurrency(from properties: [String: Any]?) -> String {
+        (properties?["currency"] as? String) ?? "USD"
     }
-    
 }
 
 // MARK: - AppsFlyer Lib Delegate conformance
 
 extension AppsFlyerDestination: AppsFlyerLibDelegate {
     public func onConversionDataSuccess(_ conversionInfo: [AnyHashable : Any]) {
-        guard let firstLaunchFlag = conversionInfo["is_first_launch"] as? Int else {
-            return
-        }
-        
-        guard let status = conversionInfo["af_status"] as? String else {
-            return
-        }
-        
-        if (firstLaunchFlag == 1) {
-            segDelegate?.onConversionDataSuccess(conversionInfo)
-            if (status == "Non-organic") {
-                if let mediaSource = conversionInfo["media_source"] , let campaign = conversionInfo["campaign"], let adgroup = conversionInfo["adgroup"]{
-                    
-                    let campaign: [String: Any] = [
-                        "source": mediaSource,
-                        "name": campaign,
-                        "ad_group": adgroup
-                    ]
-                    let campaignStr = (campaign.compactMap({ (key, value) -> String in
-                        return "\(key)=\(value)"
-                    }) as Array).joined(separator: ";")
-                    let properties: [String: Codable] = [
-                        "provider": "AppsFlyer",
-                        "campaign": campaignStr
-                    ]
-                    analytics?.track(name: "Install Attributed", properties: properties)
-                    
-                }
-            } else {
-                analytics?.track(name: "Organic Install")
+        guard let firstLaunchFlag = conversionInfo["is_first_launch"] as? Int, firstLaunchFlag == 1 else { return }
+        guard let status = conversionInfo["af_status"] as? String else { return }
+
+        segDelegate?.onConversionDataSuccess(conversionInfo)
+
+        if status == "Non-organic" {
+            if let mediaSource = conversionInfo["media_source"] , let campaign = conversionInfo["campaign"], let adgroup = conversionInfo["adgroup"]{
+
+                let campaign: [String: Any] = [
+                    "source": mediaSource,
+                    "name": campaign,
+                    "ad_group": adgroup
+                ]
+                let campaignStr = (campaign.compactMap({ (key, value) -> String in
+                    return "\(key)=\(value)"
+                }) as Array).joined(separator: ";")
+                let properties: [String: Codable] = [
+                    "provider": "AppsFlyer",
+                    "campaign": campaignStr
+                ]
+                analytics?.track(name: "Install Attributed", properties: properties)
             }
         } else {
+            analytics?.track(name: "Organic Install")
         }
-        
     }
     
     public func onConversionDataFail(_ error: Error) {
         segDelegate?.onConversionDataFail(error)
     }
-    
     
     public func onAppOpenAttribution(_ attributionData: [AnyHashable: Any]) {
         segDelegate?.onAppOpenAttribution?(attributionData)
@@ -258,8 +235,7 @@ extension AppsFlyerDestination: AppsFlyerLibDelegate {
             analytics?.track(name: "Deep Link Opened", properties: properties)
         }
     }
-    
-    
+
     public func onAppOpenAttributionFailure(_ error: Error) {
         segDelegate?.onAppOpenAttributionFailure?(error)
     }
@@ -286,8 +262,8 @@ extension AppsFlyerDestination: DeepLinkDelegate, UIApplicationDelegate {
             return
         }
         
-        guard let deepLinkObj:DeepLink = result.deepLink else { return }
-        
+        guard let deepLinkObj: DeepLink = result.deepLink else { return }
+
         if (deepLinkObj.isDeferred == true) {
             
             let campaign: [String: Any] = [
@@ -321,55 +297,9 @@ extension AppsFlyerDestination: DeepLinkDelegate, UIApplicationDelegate {
             ]
             
             analytics?.track(name: "Direct Deep Link", properties: properties)
-            
         }
-        
-        // Uncomment the following code and alter to fit your implementation in order
-        // to collect deep linking attribution data
-        
-        //Logic to grab AppsFlyer's deep link value to instantiate correct VC
-        //        guard let productNameStr = deepLinkObj.deeplinkValue else {
-        //            print("Could not extract deep_link_value from deep link object")
-        //            return
-        //        }
-        
-        //implement your own logic to open the correct screen/content
-        //        walkToSceneWithParams(product: productNameStr, deepLinkObj: deepLinkObj)
     }
-    
-    
-    // User logic for opening Deep Links
-    //    fileprivate func walkToSceneWithParams(product: String, deepLinkObj: DeepLink) {
-    //        let storyBoard: UIStoryboard = UIStoryboard(name: "Main", bundle: nil)
-    //        UIApplication.shared.windows.first?.rootViewController?.dismiss(animated: true, completion: nil)
-    //
-    //        let destVC = "product_vc"
-    //        if let newVC = storyBoard.instantiateVC(withIdentifier: destVC) {
-    //
-    //            print("[AFSDK] AppsFlyer routing to section: \(destVC)")
-    //            newVC.deepLinkData = deepLinkObj
-    //
-    //            UIApplication.shared.windows.first?.rootViewController?.present(newVC, animated: true, completion: nil)
-    //        } else {
-    //            print("[AFSDK] AppsFlyer: could not find section: \(destVC)")
-    //        }
-    //    }
 }
-
-//MARK: - UI StoryBoard Extension; Deep Linking
-
-//Aditonal logic for Deep Linking
-//extension UIStoryboard {
-//    func instantiateVC(withIdentifier identifier: String) -> DLViewController? {
-//        // "identifierToNibNameMap" – dont change it. It is a key for searching IDs
-//        if let identifiersList = self.value(forKey: "identifierToNibNameMap") as? [String: Any] {
-//            if identifiersList[identifier] != nil {
-//                return self.instantiateViewController(withIdentifier: identifier) as? DLViewController
-//            }
-//        }
-//        return nil
-//    }
-//}
 
 private struct AppsFlyerSettings: Codable {
     let appsFlyerDevKey: String
