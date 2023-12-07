@@ -31,6 +31,7 @@
 import Foundation
 import Segment
 import AppsFlyerLib
+import UIKit
 
 @objc(SEGAppsFlyerDestination)
 public class ObjCSegmentAppsFlyer: NSObject, ObjCPlugin, ObjCPluginShim {
@@ -85,7 +86,7 @@ public class AppsFlyerDestination: UIResponder, DestinationPlugin  {
 
         appsFlyerLib.deepLinkDelegate = self
 
-        if settings.trackAttributionData {
+        if settings.trackAttributionData ?? false {
             appsFlyerLib.delegate = self
         }
 
