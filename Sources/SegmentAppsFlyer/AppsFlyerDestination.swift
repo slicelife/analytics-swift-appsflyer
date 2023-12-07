@@ -121,7 +121,9 @@ public class AppsFlyerDestination: UIResponder, DestinationPlugin  {
 
         if let revenue = extractRevenue(from: properties) {
             properties?["af_revenue"] = revenue
-            properties?["af_currency"] = extractCurrency(from: properties)
+
+            let currency = extractCurrency(from: properties)
+            properties?["af_currency"] = currency
 
             properties?.removeValue(forKey: "revenue")
             properties?.removeValue(forKey: "currency")
