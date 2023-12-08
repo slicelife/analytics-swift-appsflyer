@@ -32,7 +32,9 @@ extension Analytics {
                     .trackApplicationLifecycleEvents(true))
         
         let deepLinkHandler = DeepLinkManager()
-        let appsFlyer = AppsFlyerDestination(segDLDelegate: deepLinkHandler)
+        let appsFlyer = AppsFlyerDestination(segDLDelegate: deepLinkHandler, additionalConfigurationHandler: { appsFlyerLib in
+            appsFlyerLib.isDebug = true
+        })
         analytics.add(plugin: appsFlyer)
         return analytics
     }
