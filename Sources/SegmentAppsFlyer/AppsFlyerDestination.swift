@@ -255,11 +255,13 @@ extension AppsFlyerDestination: DeepLinkDelegate, UIApplicationDelegate {
         segDLDelegate?.didResolveDeepLink?(result)
         switch result.status {
         case .notFound:
+            analytics?.log(message: "AppsFlyer: Deep link not found")
             return
         case .failure:
+            analytics?.log(message: "AppsFlyer: Deep link failure!")
             return
         case .found:
-            return
+            analytics?.log(message: "AppsFlyer Deep link found")
         }
         
         guard let deepLinkObj: DeepLink = result.deepLink else { return }
